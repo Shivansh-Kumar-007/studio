@@ -18,6 +18,11 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // experimental: { // Removed as Roboto font is imported via CSS
+  //   fontLoaders: [
+  //     { loader: '@next/font/google', options: { subsets: ['latin'] } },
+  //   ],
+  // },
 };
 
 export default nextConfig;

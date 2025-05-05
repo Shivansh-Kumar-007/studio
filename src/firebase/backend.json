@@ -1,0 +1,12 @@
+{
+  "entities": {},
+  "auth": {
+    "providers": [
+      "email"
+    ],
+    "rationales": {
+      "email": "Standard email/password authentication for user accounts."
+    }
+  },
+  "firestore": {}
+}
