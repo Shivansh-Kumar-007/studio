@@ -6,7 +6,9 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
-import { Upload, Download, Play, Loader2 } from 'lucide-react';
+import { Input } from "@/components/ui/input"; // Added Input component
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert" // Added Alert component
+import { Upload, Download, Play, Loader2, KeyRound, Info } from 'lucide-react'; // Added KeyRound, Info
 import { useToast } from '@/hooks/use-toast';
 import { Toaster } from '@/components/ui/toaster';
 import { pixelateVideo, type PixelateVideoInput } from '@/ai/flows/pixelate-video-flow'; // Import the flow
@@ -15,8 +17,9 @@ export default function Home() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [pixelationLevel, setPixelationLevel] = useState<number>(10);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null); // Will store Blob URL
-  const [originalVideoUrl, setOriginalVideoUrl] = useState<string | null>(null); // Will store Blob URL
+  const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
+  const [originalVideoUrl, setOriginalVideoUrl] = useState<string | null>(null);
+  const [openAIApiKey, setOpenAIApiKey] = useState<string>(''); // State for API Key
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -31,12 +34,11 @@ export default function Home() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
-      // Clean up previous URLs before setting new ones
       if (originalVideoUrl) URL.revokeObjectURL(originalVideoUrl);
       if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl);
 
       setVideoFile(file);
-      setProcessedVideoUrl(null); // Reset processed video on new upload
+      setProcessedVideoUrl(null);
       const url = URL.createObjectURL(file);
       setOriginalVideoUrl(url);
     } else {
@@ -55,7 +57,6 @@ export default function Home() {
     fileInputRef.current?.click();
   };
 
-  // Converts Blob URL to Data URI
   const blobUrlToDataUri = async (blobUrl: string): Promise<string> => {
     const response = await fetch(blobUrl);
     const blob = await response.blob();
@@ -67,7 +68,6 @@ export default function Home() {
     });
   };
 
-   // Converts Data URI back to Blob URL for video player source
    const dataUriToBlobUrl = (dataUri: string): string | null => {
      try {
        const byteString = atob(dataUri.split(',')[1]);
@@ -95,32 +95,39 @@ export default function Home() {
       });
       return;
     }
+    // Temporarily removed API key check as DALL-E integration is not feasible for video transformation
+    // if (!openAIApiKey) {
+    //   toast({
+    //     title: "API Key Missing",
+    //     description: "Please enter your OpenAI API key.",
+    //     variant: "destructive",
+    //   });
+    //   return;
+    // }
 
     setIsProcessing(true);
-    setProcessedVideoUrl(null); // Clear previous preview
+    setProcessedVideoUrl(null);
 
     try {
-      // Convert the Blob URL to a Data URI for the flow
       const videoDataUri = await blobUrlToDataUri(originalVideoUrl);
 
       const input: PixelateVideoInput = {
         videoDataUri: videoDataUri,
         pixelationLevel: pixelationLevel,
+        // Although we collect the key, the simulation flow doesn't use it
+        // as DALL-E video transformation isn't implemented.
+        // openAIApiKey: openAIApiKey,
       };
 
-      // Call the Genkit flow
       const result = await pixelateVideo(input);
-
-      // Convert the resulting Data URI back to a Blob URL for the video player
       const processedBlobUrl = dataUriToBlobUrl(result.processedVideoDataUri);
 
       if (processedBlobUrl) {
-         // Revoke previous processed URL if it exists
          if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl);
          setProcessedVideoUrl(processedBlobUrl);
          toast({
-           title: "Processing Complete",
-           description: "Your simulated pixelated video clip is ready.",
+           title: "Processing Simulation Complete",
+           description: "Video processing simulation finished.",
          });
       } else {
         throw new Error("Failed to create blob URL for processed video.");
@@ -136,15 +143,13 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
-  }, [videoFile, originalVideoUrl, pixelationLevel, toast, processedVideoUrl]); // Added processedVideoUrl dependency for cleanup
+  }, [videoFile, originalVideoUrl, pixelationLevel, toast, processedVideoUrl, openAIApiKey]); // Added openAIApiKey
 
   const handleDownload = () => {
     if (!processedVideoUrl || !videoFile) return;
 
-    // Download the blob URL directly
     const link = document.createElement('a');
     link.href = processedVideoUrl;
-    // Generate a filename like pixelated_origfilename_p10.mp4
     const pixelationSuffix = `_p${pixelationLevel}`;
     const fileExtension = videoFile.name.split('.').pop() || 'mp4';
     const baseName = videoFile.name.substring(0, videoFile.name.lastIndexOf('.')) || 'video';
@@ -164,6 +169,15 @@ export default function Home() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Disclaimer about simulation */}
+          <Alert variant="default" className="bg-blue-50 border-blue-200 text-blue-800">
+            <Info className="h-4 w-4 !text-blue-600" />
+            <AlertTitle className="font-semibold">Simulation Notice</AlertTitle>
+            <AlertDescription>
+              This tool currently <strong className="font-medium">simulates</strong> video pixelation. It does not perform actual video transformation or use AI models like DALL-E for conversion. The output video will be the same as the input.
+            </AlertDescription>
+          </Alert>
+
           {/* Video Upload */}
           <div className="space-y-2">
             <Label htmlFor="video-upload">1. Upload Video</Label>
@@ -197,23 +211,21 @@ export default function Home() {
                 )}
                 {processedVideoUrl && (
                   <div className="border rounded-lg overflow-hidden aspect-video bg-black">
-                     <Label className="text-xs text-muted-foreground block pt-1 text-center">Pixelated (p{pixelationLevel})</Label>
+                     <Label className="text-xs text-muted-foreground block pt-1 text-center">Simulated Output (p{pixelationLevel})</Label>
                     <video controls src={processedVideoUrl} className="w-full h-auto max-h-40">
                       Your browser does not support the video tag.
                     </video>
                   </div>
                 )}
-                 {/* Placeholder if only original is loaded */}
                  {originalVideoUrl && !processedVideoUrl && !isProcessing && (
                     <div className="border border-dashed rounded-lg aspect-video bg-muted flex items-center justify-center">
-                       <p className="text-xs text-muted-foreground">Pixelated preview will appear here</p>
+                       <p className="text-xs text-muted-foreground">Simulated output preview will appear here</p>
                     </div>
                  )}
-                 {/* Loading indicator */}
                  {isProcessing && (
                     <div className="border border-dashed rounded-lg aspect-video bg-muted flex flex-col items-center justify-center">
                          <Loader2 className="mb-2 h-6 w-6 animate-spin text-primary" />
-                       <p className="text-xs text-muted-foreground">Processing...</p>
+                       <p className="text-xs text-muted-foreground">Simulating...</p>
                     </div>
                  )}
               </div>
@@ -222,7 +234,7 @@ export default function Home() {
 
           {/* Pixelation Control */}
           <div className="space-y-2">
-            <Label htmlFor="pixelation-slider">2. Set Pixelation Level</Label>
+            <Label htmlFor="pixelation-slider">2. Set Pixelation Level (Simulation)</Label>
             <Slider
               id="pixelation-slider"
               min={2}
@@ -236,21 +248,38 @@ export default function Home() {
             <p className="text-sm text-center text-muted-foreground">Level: {pixelationLevel}</p>
           </div>
 
+           {/* OpenAI API Key Input - Kept for UI demonstration */}
+           <div className="space-y-2">
+            <Label htmlFor="openai-key">OpenAI API Key (Optional - Not currently used)</Label>
+            <div className="flex items-center space-x-2">
+               <KeyRound className="w-4 h-4 text-muted-foreground" />
+               <Input
+                id="openai-key"
+                type="password"
+                placeholder="Enter your OpenAI API key"
+                value={openAIApiKey}
+                onChange={(e) => setOpenAIApiKey(e.target.value)}
+                disabled={isProcessing}
+              />
+            </div>
+             <p className="text-xs text-muted-foreground">Your key is used locally and not stored. Note: This key is not currently used for processing.</p>
+          </div>
+
           {/* Process Button */}
           <Button
             onClick={handleProcessVideo}
-            disabled={!videoFile || isProcessing}
+            disabled={!videoFile || isProcessing } // Temporarily removed API key check from disabled state
             className="w-full"
           >
             {isProcessing ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
+                Simulating...
               </>
             ) : (
               <>
                 <Play className="mr-2 h-4 w-4" />
-                Generate Pixelated Clip
+                Run Simulation
               </>
             )}
           </Button>
@@ -265,7 +294,7 @@ export default function Home() {
             className="w-full"
           >
             <Download className="mr-2 h-4 w-4" />
-            Download Clip
+            Download Simulated Clip
           </Button>
         </CardFooter>
       </Card>
