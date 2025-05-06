@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
@@ -8,28 +9,40 @@ import { Label } from "@/components/ui/label";
 import { Upload, Download, Play, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Toaster } from '@/components/ui/toaster';
+import { pixelateVideo, type PixelateVideoInput } from '@/ai/flows/pixelate-video-flow'; // Import the flow
 
 export default function Home() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [pixelationLevel, setPixelationLevel] = useState<number>(10);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
-  const [originalVideoUrl, setOriginalVideoUrl] = useState<string | null>(null);
+  const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null); // Will store Blob URL
+  const [originalVideoUrl, setOriginalVideoUrl] = useState<string | null>(null); // Will store Blob URL
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Clean up object URLs when component unmounts or video changes
+  React.useEffect(() => {
+    return () => {
+      if (originalVideoUrl) URL.revokeObjectURL(originalVideoUrl);
+      if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl);
+    };
+  }, [originalVideoUrl, processedVideoUrl]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
+      // Clean up previous URLs before setting new ones
+      if (originalVideoUrl) URL.revokeObjectURL(originalVideoUrl);
+      if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl);
+
       setVideoFile(file);
       setProcessedVideoUrl(null); // Reset processed video on new upload
       const url = URL.createObjectURL(file);
       setOriginalVideoUrl(url);
-      // Clean up previous object URL
-      return () => URL.revokeObjectURL(url);
     } else {
       setVideoFile(null);
       setOriginalVideoUrl(null);
+      setProcessedVideoUrl(null);
       toast({
         title: "Invalid File Type",
         description: "Please upload a valid video file.",
@@ -42,8 +55,39 @@ export default function Home() {
     fileInputRef.current?.click();
   };
 
-  const handleProcessVideo = useCallback(() => {
-    if (!videoFile) {
+  // Converts Blob URL to Data URI
+  const blobUrlToDataUri = async (blobUrl: string): Promise<string> => {
+    const response = await fetch(blobUrl);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+   // Converts Data URI back to Blob URL for video player source
+   const dataUriToBlobUrl = (dataUri: string): string | null => {
+     try {
+       const byteString = atob(dataUri.split(',')[1]);
+       const mimeString = dataUri.split(',')[0].split(':')[1].split(';')[0];
+       const ab = new ArrayBuffer(byteString.length);
+       const ia = new Uint8Array(ab);
+       for (let i = 0; i < byteString.length; i++) {
+         ia[i] = byteString.charCodeAt(i);
+       }
+       const blob = new Blob([ab], { type: mimeString });
+       return URL.createObjectURL(blob);
+     } catch (error) {
+       console.error("Error converting Data URI to Blob URL:", error);
+       return null;
+     }
+   };
+
+
+  const handleProcessVideo = useCallback(async () => {
+    if (!videoFile || !originalVideoUrl) {
       toast({
         title: "No Video Uploaded",
         description: "Please upload a video file first.",
@@ -55,36 +99,59 @@ export default function Home() {
     setIsProcessing(true);
     setProcessedVideoUrl(null); // Clear previous preview
 
-    // Simulate video processing
-    console.log(`Simulating pixelation with level: ${pixelationLevel}`);
-    setTimeout(() => {
-      // In a real app, this URL would come from the backend/processing service
-      // For simulation, we'll reuse the original video URL for preview
-      const url = URL.createObjectURL(videoFile);
-      setProcessedVideoUrl(url);
-      setIsProcessing(false);
-      toast({
-        title: "Processing Complete",
-        description: "Your pixelated video clip is ready for preview.",
-      });
-    }, 2500); // Simulate 2.5 seconds processing time
+    try {
+      // Convert the Blob URL to a Data URI for the flow
+      const videoDataUri = await blobUrlToDataUri(originalVideoUrl);
 
-  }, [videoFile, pixelationLevel, toast]);
+      const input: PixelateVideoInput = {
+        videoDataUri: videoDataUri,
+        pixelationLevel: pixelationLevel,
+      };
+
+      // Call the Genkit flow
+      const result = await pixelateVideo(input);
+
+      // Convert the resulting Data URI back to a Blob URL for the video player
+      const processedBlobUrl = dataUriToBlobUrl(result.processedVideoDataUri);
+
+      if (processedBlobUrl) {
+         // Revoke previous processed URL if it exists
+         if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl);
+         setProcessedVideoUrl(processedBlobUrl);
+         toast({
+           title: "Processing Complete",
+           description: "Your simulated pixelated video clip is ready.",
+         });
+      } else {
+        throw new Error("Failed to create blob URL for processed video.");
+      }
+
+    } catch (error) {
+      console.error("Processing failed:", error);
+      toast({
+        title: "Processing Failed",
+        description: "Could not process the video. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [videoFile, originalVideoUrl, pixelationLevel, toast, processedVideoUrl]); // Added processedVideoUrl dependency for cleanup
 
   const handleDownload = () => {
     if (!processedVideoUrl || !videoFile) return;
 
-    // Simulate downloading the processed file.
-    // In a real app, this would point to the actual processed file URL.
+    // Download the blob URL directly
     const link = document.createElement('a');
     link.href = processedVideoUrl;
-    // Suggest a filename (in a real app, this would be more meaningful)
-    link.download = `pixelated_${videoFile.name.split('.')[0].slice(0,10)}.mp4`;
+    // Generate a filename like pixelated_origfilename_p10.mp4
+    const pixelationSuffix = `_p${pixelationLevel}`;
+    const fileExtension = videoFile.name.split('.').pop() || 'mp4';
+    const baseName = videoFile.name.substring(0, videoFile.name.lastIndexOf('.')) || 'video';
+    link.download = `pixelated_${baseName.slice(0,15)}${pixelationSuffix}.${fileExtension}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    // Note: URL.revokeObjectURL(processedVideoUrl) should be called eventually
-    // if the blob URL isn't needed anymore, potentially in a useEffect cleanup.
   };
 
   return (
@@ -93,7 +160,7 @@ export default function Home() {
         <CardHeader>
           <CardTitle className="text-3xl font-bold text-center text-primary">PixelClip</CardTitle>
           <CardDescription className="text-center">
-            Generate a 10-second pixelated clip for your videos.
+            Upload a video, choose a pixelation level, and generate a short, pixelated clip. (Simulation)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -117,10 +184,39 @@ export default function Home() {
                 className="hidden"
               />
             </div>
-            {originalVideoUrl && (
-               <div className="mt-2 text-center">
-                 <p className="text-xs text-muted-foreground">Original video selected.</p>
-               </div>
+             {/* Combined Preview Area */}
+             {(originalVideoUrl || processedVideoUrl) && (
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {originalVideoUrl && (
+                  <div className="border rounded-lg overflow-hidden aspect-video bg-black">
+                    <Label className="text-xs text-muted-foreground block pt-1 text-center">Original</Label>
+                    <video src={originalVideoUrl} controls className="w-full h-auto max-h-40">
+                      Your browser does not support the video tag.
+                    </video>
+                  </div>
+                )}
+                {processedVideoUrl && (
+                  <div className="border rounded-lg overflow-hidden aspect-video bg-black">
+                     <Label className="text-xs text-muted-foreground block pt-1 text-center">Pixelated (p{pixelationLevel})</Label>
+                    <video controls src={processedVideoUrl} className="w-full h-auto max-h-40">
+                      Your browser does not support the video tag.
+                    </video>
+                  </div>
+                )}
+                 {/* Placeholder if only original is loaded */}
+                 {originalVideoUrl && !processedVideoUrl && !isProcessing && (
+                    <div className="border border-dashed rounded-lg aspect-video bg-muted flex items-center justify-center">
+                       <p className="text-xs text-muted-foreground">Pixelated preview will appear here</p>
+                    </div>
+                 )}
+                 {/* Loading indicator */}
+                 {isProcessing && (
+                    <div className="border border-dashed rounded-lg aspect-video bg-muted flex flex-col items-center justify-center">
+                         <Loader2 className="mb-2 h-6 w-6 animate-spin text-primary" />
+                       <p className="text-xs text-muted-foreground">Processing...</p>
+                    </div>
+                 )}
+              </div>
             )}
           </div>
 
@@ -159,17 +255,7 @@ export default function Home() {
             )}
           </Button>
 
-          {/* Video Preview */}
-          {processedVideoUrl && (
-            <div className="space-y-2">
-              <Label>3. Preview Clip</Label>
-              <div className="aspect-video bg-black rounded-lg overflow-hidden border border-border">
-                <video controls src={processedVideoUrl} className="w-full h-full">
-                  Your browser does not support the video tag.
-                </video>
-              </div>
-            </div>
-          )}
+
         </CardContent>
         <CardFooter>
           <Button

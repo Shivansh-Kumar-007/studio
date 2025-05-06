@@ -96,6 +96,3 @@ body {
 body {
   font-family: 'Roboto', Arial, Helvetica, sans-serif; /* Use Roboto or fallback */
 }
-
-/* Add import for Roboto font if not already included via next/font */
-/* Moved the @import to the top */
